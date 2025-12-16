@@ -1,10 +1,11 @@
 use clap::Parser;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::env;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 use std::process::{Command, Stdio};
+
 pub fn wsl_to_windows_path(wsl_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("wslpath").arg("-w").arg(wsl_path).output()?;
 
@@ -16,7 +17,7 @@ pub fn wsl_to_windows_path(wsl_path: &str) -> Result<String, Box<dyn std::error:
     Ok(stdout)
 }
 
-pub fn get_flasher_args() -> Result<String, Box<dyn std::error::Error>> {
+pub fn get_flasher_args() -> Result<Value, Box<dyn std::error::Error>> {
     let windows_path =
         wsl_to_windows_path(env::current_dir().unwrap().display().to_string().as_str())?;
 
@@ -28,6 +29,10 @@ pub fn get_flasher_args() -> Result<String, Box<dyn std::error::Error>> {
 
     let file = File::open(json_path)?;
     let root_json: Value = serde_json::from_reader(file)?;
+
+    let chip = root_json["extra_esptool_args"]["chip"]
+        .as_str() // 转换为字符串（返回Option<&str>）
+        .ok_or("未找到chip字段或字段类型不是字符串")?; // 处理空值
 
     // 3. 安全获取 flash_files 字段（检查类型和存在性）
     let flash_files = match root_json.get("flash_files") {
@@ -53,8 +58,10 @@ pub fn get_flasher_args() -> Result<String, Box<dyn std::error::Error>> {
 
     // 5. 合并所有片段为最终字符串（空格分隔）
     let final_flash_str = flash_str_parts.join(" ");
-
-    Ok(final_flash_str)
+    Ok(json!({
+        "flasher_args": final_flash_str,
+        "chip": chip
+    }))
 }
 
 fn run_shell_command(cmd: &str, args: &[&str]) {
@@ -80,7 +87,7 @@ fn run_shell_command(cmd: &str, args: &[&str]) {
         }
         match std::str::from_utf8(&buffer[0..bytes_read]) {
             Ok(s) => print!("{}", s),
-            Err(e) => {
+            Err(_e) => {
                 print!("{:?}", &buffer[0..bytes_read]);
             }
         }
@@ -91,10 +98,10 @@ fn run_shell_command(cmd: &str, args: &[&str]) {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(short, long, help = "设备端口号")]
     port: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new( ["flash", "erase", "merge"]), help = "flash erase merge")]
     command: Option<String>,
 }
 
@@ -104,22 +111,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Some(command) => match command.to_string().as_str() {
             "flash" => {
-                let flasher_args = get_flasher_args()?;
+                let json_value = get_flasher_args()?;
                 let full_args = format!(
-                    "D:\\esptool-windows-amd64\\esptool.exe -p {} -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
+                    "D:\\esptool-windows-amd64\\esptool.exe -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
                     args.port.unwrap(),
-                    flasher_args
+                    json_value["chip"].as_str().unwrap(),
+                    json_value["flasher_args"].as_str().unwrap()
                 );
                 run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
             }
             "erase" => {
                 let full_args = format!(
-                    "D:\\esptool-windows-amd64\\esptool.exe -p {} -b 460800 erase-flash",
+                    "D:\\esptool-windows-amd64\\esptool.exe -p {} -b 1152000 erase-flash",
                     args.port.unwrap()
                 );
                 run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
             }
-            "merge" => {}
+            "merge" => {
+                let current_dir = env::current_dir().unwrap();
+                let json_value = get_flasher_args()?;
+                let full_args = format!(
+                    "D:\\esptool-windows-amd64\\esptool.exe -c {} merge-bin -o {}/full-{}.bin {}",
+                    json_value["chip"].as_str().unwrap(),
+                    current_dir.display().to_string().as_str(),
+                    current_dir.file_name().and_then(|name| name.to_str()).unwrap(),
+                    json_value["flasher_args"].as_str().unwrap()
+                );
+                run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
+            }
             &_ => {
                 eprintln!("没有这个命令");
             }
