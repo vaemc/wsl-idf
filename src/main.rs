@@ -106,14 +106,16 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
+    let esptool_path = env::var("ESPTOOL").expect("ESPTOOL WINDOWS路径环境变量未设置");
 
+    let args = Args::parse();
     match args.command {
         Some(command) => match command.to_string().as_str() {
             "flash" => {
                 let json_value = get_flasher_args()?;
                 let full_args = format!(
-                    "D:\\esptool-windows-amd64\\esptool.exe -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
+                    "{} -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
+                    esptool_path,
                     args.port.unwrap(),
                     json_value["chip"].as_str().unwrap(),
                     json_value["flasher_args"].as_str().unwrap()
@@ -122,7 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "erase" => {
                 let full_args = format!(
-                    "D:\\esptool-windows-amd64\\esptool.exe -p {} -b 1152000 erase-flash",
+                    "{} -p {} -b 1152000 erase-flash",
+                    esptool_path,
                     args.port.unwrap()
                 );
                 run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
@@ -131,10 +134,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let current_dir = env::current_dir().unwrap();
                 let json_value = get_flasher_args()?;
                 let full_args = format!(
-                    "D:\\esptool-windows-amd64\\esptool.exe -c {} merge-bin -o {}/full-{}.bin {}",
+                    "{} -c {} merge-bin -o {}/full-{}.bin {}",
+                    esptool_path,
                     json_value["chip"].as_str().unwrap(),
                     current_dir.display().to_string().as_str(),
-                    current_dir.file_name().and_then(|name| name.to_str()).unwrap(),
+                    current_dir
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap(),
                     json_value["flasher_args"].as_str().unwrap()
                 );
                 run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
