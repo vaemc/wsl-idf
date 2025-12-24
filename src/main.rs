@@ -101,8 +101,46 @@ struct Args {
     #[arg(short, long, help = "设备端口号")]
     port: Option<String>,
 
-    #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new( ["flash", "erase", "merge"]), help = "flash erase merge")]
+    #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new( ["flash", "erase", "merge", "flashx"]), help = "flash(烧录) erase(擦除) merge(合并) flashx(擦除后烧录)")]
     command: Option<String>,
+}
+
+fn flash(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let json_value = get_flasher_args()?;
+    let full_args = format!(
+        "{} -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
+        esptool_path,
+        port,
+        json_value["chip"].as_str().unwrap(),
+        json_value["flasher_args"].as_str().unwrap()
+    );
+    run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
+
+    Ok(())
+}
+
+fn erase(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let full_args = format!("{} -p {} -b 1152000 erase-flash", esptool_path, port);
+    run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
+    Ok(())
+}
+
+fn merge(esptool_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let current_dir = env::current_dir().unwrap();
+    let json_value = get_flasher_args()?;
+    let full_args = format!(
+        "{} -c {} merge-bin -o {}/full-{}.bin {}",
+        esptool_path,
+        json_value["chip"].as_str().unwrap(),
+        current_dir.display().to_string().as_str(),
+        current_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap(),
+        json_value["flasher_args"].as_str().unwrap()
+    );
+    run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -111,40 +149,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     match args.command {
         Some(command) => match command.to_string().as_str() {
-            "flash" => {
-                let json_value = get_flasher_args()?;
-                let full_args = format!(
-                    "{} -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
-                    esptool_path,
-                    args.port.unwrap(),
-                    json_value["chip"].as_str().unwrap(),
-                    json_value["flasher_args"].as_str().unwrap()
-                );
-                run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
-            }
-            "erase" => {
-                let full_args = format!(
-                    "{} -p {} -b 1152000 erase-flash",
-                    esptool_path,
-                    args.port.unwrap()
-                );
-                run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
-            }
-            "merge" => {
-                let current_dir = env::current_dir().unwrap();
-                let json_value = get_flasher_args()?;
-                let full_args = format!(
-                    "{} -c {} merge-bin -o {}/full-{}.bin {}",
-                    esptool_path,
-                    json_value["chip"].as_str().unwrap(),
-                    current_dir.display().to_string().as_str(),
-                    current_dir
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap(),
-                    json_value["flasher_args"].as_str().unwrap()
-                );
-                run_shell_command("powershell.exe", &["-Command", &full_args.to_string()])
+            "flash" => flash(&esptool_path, &args.port.unwrap())?,
+            "erase" => erase(&esptool_path, &args.port.unwrap())?,
+            "merge" => merge(&esptool_path)?,
+            "flashx" => {
+                erase(&esptool_path, &args.port.clone().unwrap())?;
+                flash(&esptool_path, &args.port.unwrap())?
             }
             &_ => {
                 eprintln!("没有这个命令");
