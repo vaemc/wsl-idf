@@ -143,9 +143,20 @@ fn merge(esptool_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let esptool_path = env::var("ESPTOOL").expect("ESPTOOL WINDOWS路径环境变量未设置");
+fn port_list() -> Result<(), Box<dyn std::error::Error>> {
+    run_shell_command(
+        "powershell.exe",
+        &[
+            "-Command",
+            "Get-WmiObject -Class Win32_SerialPort | Select-Object -ExpandProperty DeviceID",
+        ],
+    );
+    Ok(())
+}
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    port_list()?;
+    let esptool_path = env::var("ESPTOOL").expect("ESPTOOL WINDOWS路径环境变量未设置");
     let args = Args::parse();
     match args.command {
         Some(command) => match command.to_string().as_str() {
@@ -160,17 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("没有这个命令");
             }
         },
-
-        None => {
-            run_shell_command(
-                "powershell.exe",
-                &[
-                    "-Command",
-                    "Get-WmiObject -Class Win32_SerialPort | Select-Object -ExpandProperty DeviceID",
-                ],
-            );
-        }
+        None => {}
     }
-
     Ok(())
 }
