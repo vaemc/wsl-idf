@@ -105,15 +105,19 @@ struct Args {
     command: Option<String>,
 }
 
-fn flash(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn flash(esptool_path: &str, port: &str, erase: bool) -> Result<(), Box<dyn std::error::Error>> {
     let json_value = get_flasher_args()?;
-    let full_args = format!(
+    let mut full_args = format!(
         "{} -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
         esptool_path,
         port,
         json_value["chip"].as_str().unwrap(),
         json_value["flasher_args"].as_str().unwrap()
     );
+    if erase {
+        full_args.push_str(" --erase-all");
+    }
+
     run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
 
     Ok(())
@@ -160,13 +164,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     match args.command {
         Some(command) => match command.to_string().as_str() {
-            "flash" => flash(&esptool_path, &args.port.unwrap())?,
+            "flash" => flash(&esptool_path, &args.port.unwrap(), false)?,
             "erase" => erase(&esptool_path, &args.port.unwrap())?,
             "merge" => merge(&esptool_path)?,
-            "flashx" => {
-                erase(&esptool_path, &args.port.clone().unwrap())?;
-                flash(&esptool_path, &args.port.unwrap())?
-            }
+            "flashx" => flash(&esptool_path, &args.port.unwrap(), true)?,
             &_ => {
                 eprintln!("没有这个命令");
             }
