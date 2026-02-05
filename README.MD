@@ -1,11 +1,11 @@
 # wsl-idf
+在wsl中直接烧录esp-idf项目固件
 
 ## 配置esptool
 `export ESPTOOL='D:\\esptool-windows-amd64\\esptool.exe'` esptool.exe必须放到windows系统上面
 
 ### 配置wsl-idf
 `alias wsl-idf='$HOME/rust-project/wsl-idf/target/release/wsl-idf'`
-
 
 ## 用法
 在esp-idf项目先运行idf.py build，编译项目成功后执行
