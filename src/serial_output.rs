@@ -1,3 +1,5 @@
+mod rules;
+
 use std::io::{self, Read, Write};
 
 /// ESP-IDF 日志等级（行首单字符 E / W / I / D / V）。
@@ -40,9 +42,17 @@ pub fn detect_esp_idf_level(line: &str) -> Option<EspLogLevel> {
     EspLogLevel::from_char(level)
 }
 
-/// 命中 ESP-IDF 格式时返回对应 ANSI 颜色前缀。
+/// 命中 ESP-IDF 格式时返回对应 ANSI 颜色前缀（含特殊规则覆盖）。
 pub fn esp_idf_ansi_color(line: &str) -> Option<&'static str> {
-    detect_esp_idf_level(line).map(EspLogLevel::ansi_prefix)
+    let level = detect_esp_idf_level(line)?;
+    Some(rules::resolve_ansi_color(line, level))
+}
+
+/// ESP-IDF 行中 TAG 之后的正文，例如 `I (1) TAG: @@@msg` → `@@@msg`。
+pub(crate) fn message_body(line: &str) -> Option<&str> {
+    let (_, after_ts) = line.split_once(") ")?;
+    let (_, body) = after_ts.split_once(": ")?;
+    Some(body)
 }
 
 fn detect_level_char(line: &str) -> Option<char> {
@@ -86,9 +96,11 @@ fn level_from_tokens(line: &str) -> Option<char> {
 /// 将一行串口文本写入输出流（ESP-IDF 行自动着色）。
 pub fn write_line(out: &mut impl Write, line: &[u8]) -> io::Result<()> {
     if let Ok(text) = std::str::from_utf8(line) {
-        if let Some(color) = esp_idf_ansi_color(text) {
+        if let (Some(level), Some(color)) = (detect_esp_idf_level(text), esp_idf_ansi_color(text))
+        {
+            let display = rules::display_line(text, level);
             out.write_all(color.as_bytes())?;
-            out.write_all(line)?;
+            out.write_all(display.as_bytes())?;
             out.write_all(b"\x1b[0m\n")?;
             return Ok(());
         }

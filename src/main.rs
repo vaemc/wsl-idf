@@ -87,6 +87,17 @@ fn stream_child_stdout(child: &mut std::process::Child) -> Result<(), Box<dyn st
     Ok(())
 }
 
+fn idf_build() -> Result<(), Box<dyn std::error::Error>> {
+    let status = Command::new("idf.py")
+        .arg("build")
+        .current_dir(project_dir()?)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+    check_exit(status, "idf.py build")
+}
+
 fn run_powershell(command: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new("powershell.exe")
         .args(["-Command", command])
@@ -182,6 +193,7 @@ enum EsptoolCommand {
 }
 
 fn flash(esptool_path: &str, port: &str, erase: bool) -> Result<(), Box<dyn std::error::Error>> {
+    idf_build()?;
     let info = load_flasher_build_info()?;
     let mut cmd = format!(
         "{esptool_path} -p {port} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
