@@ -1,3 +1,5 @@
+mod serial_output;
+
 use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -113,7 +115,7 @@ fn monitor(port: &str, baud: u32) -> Result<(), Box<dyn std::error::Error>> {
         .stderr(Stdio::inherit())
         .spawn()?;
 
-    stream_child_stdout(&mut child)?;
+    serial_output::stream_child_stdout(&mut child)?;
     check_exit(child.wait()?, "monitor")
 }
 
