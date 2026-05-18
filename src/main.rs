@@ -1,98 +1,108 @@
-use clap::Parser;
-use serde_json::{Value, json};
+use clap::{Parser, ValueEnum};
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
-use std::fs::File;
-use std::io::{self, Read};
-use std::path::Path;
-use std::process::{Command, Stdio};
+use std::fs;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
 
-pub fn wsl_to_windows_path(wsl_path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let output = Command::new("wslpath").arg("-w").arg(wsl_path).output()?;
+#[derive(Debug, Deserialize)]
+struct FlasherArgsJson {
+    flash_files: HashMap<String, String>,
+    extra_esptool_args: ExtraEsptoolArgs,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtraEsptoolArgs {
+    chip: String,
+}
+
+#[derive(Debug, Clone)]
+struct FlasherBuildInfo {
+    chip: String,
+    flash_args: String,
+}
+
+fn wsl_to_windows_path(wsl_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new("wslpath")
+        .arg("-w")
+        .arg(wsl_path)
+        .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("命令执行失败（退出码：{}）：{}", output.status, stderr).into());
-    }
-    let stdout = String::from_utf8(output.stdout)?;
-    Ok(stdout)
-}
-
-pub fn get_flasher_args() -> Result<Value, Box<dyn std::error::Error>> {
-    let windows_path =
-        wsl_to_windows_path(env::current_dir().unwrap().display().to_string().as_str())?;
-
-    let flasher_args = &format!(
-        "{}/build/flasher_args.json",
-        env::current_dir().unwrap().display()
-    );
-    let json_path = Path::new(flasher_args);
-
-    let file = File::open(json_path)?;
-    let root_json: Value = serde_json::from_reader(file)?;
-
-    let chip = root_json["extra_esptool_args"]["chip"]
-        .as_str() // 转换为字符串（返回Option<&str>）
-        .ok_or("未找到chip字段或字段类型不是字符串")?; // 处理空值
-
-    // 3. 安全获取 flash_files 字段（检查类型和存在性）
-    let flash_files = match root_json.get("flash_files") {
-        Some(Value::Object(map)) => map,
-        Some(_) => return Err("flash_files 字段类型错误（应为 JSON 对象）".into()),
-        None => return Err("JSON 中未找到 flash_files 字段".into()),
-    };
-
-    // 4. 遍历 flash_files 键值对，拼接目标格式字符串（替换 / 为 \）
-    let mut flash_str_parts = Vec::new();
-    for (offset, file_path_value) in flash_files {
-        // 确保文件路径是字符串类型
-        let file_path = match file_path_value.as_str() {
-            Some(s) => s,
-            None => return Err(format!("偏移量 {} 对应的文件路径不是字符串类型", offset).into()),
-        };
-        // 核心：替换 / 为 \，并拼接 build\ 前缀
-        let normalized_path = format!("build\\{}", file_path).replace('/', "\\");
-        // 拼接 "偏移量 规范化路径" 格式的片段
-        let part = format!("{} {}\\{}", offset, windows_path.trim(), normalized_path);
-        flash_str_parts.push(part);
+        return Err(format!("wslpath 失败（退出码 {}）：{}", output.status, stderr).into());
     }
 
-    // 5. 合并所有片段为最终字符串（空格分隔）
-    let final_flash_str = flash_str_parts.join(" ");
-    Ok(json!({
-        "flasher_args": final_flash_str,
-        "chip": chip
-    }))
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
-fn run_shell_command(cmd: &str, args: &[&str]) {
-    let mut cmd = Command::new(cmd)
-        .args(args)
+fn project_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(env::current_dir()?)
+}
+
+fn load_flasher_build_info() -> Result<FlasherBuildInfo, Box<dyn std::error::Error>> {
+    let project_dir = project_dir()?;
+    let windows_dir = wsl_to_windows_path(&project_dir)?;
+
+    let json_path = project_dir.join("build/flasher_args.json");
+    let root: FlasherArgsJson = serde_json::from_str(&fs::read_to_string(&json_path)?)?;
+
+    let flash_args = root
+        .flash_files
+        .iter()
+        .map(|(offset, file_path)| {
+            let normalized = format!("build\\{}", file_path).replace('/', "\\");
+            format!("{} {}\\{}", offset, windows_dir, normalized)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    Ok(FlasherBuildInfo {
+        chip: root.extra_esptool_args.chip,
+        flash_args,
+    })
+}
+
+fn run_powershell(command: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = Command::new("powershell.exe")
+        .args(["-Command", command])
         .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::inherit())
+        .spawn()?;
 
-    let stdout = cmd
+    let stdout = child
         .stdout
-        .as_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "无法获取标准输出句柄"))
-        .unwrap();
+        .take()
+        .ok_or("无法获取子进程标准输出")?;
 
     let mut reader = io::BufReader::new(stdout);
-    let mut buffer = [0; 1024];
+    let mut buffer = [0u8; 1024];
 
     loop {
-        let bytes_read = reader.read(&mut buffer).unwrap();
-        if bytes_read == 0 {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
             break;
         }
-        match std::str::from_utf8(&buffer[0..bytes_read]) {
-            Ok(s) => print!("{}", s),
-            Err(_e) => {
-                print!("{:?}", &buffer[0..bytes_read]);
-            }
-        }
+        io::stdout().write_all(&buffer[..n])?;
     }
-    cmd.wait().unwrap();
+
+    let status = child.wait()?;
+    check_exit(status, "powershell")
+}
+
+fn check_exit(status: ExitStatus, label: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{label} 退出码：{}", status).into())
+    }
+}
+
+fn require_port(port: &Option<String>) -> Result<&str, Box<dyn std::error::Error>> {
+    port.as_deref()
+        .ok_or("该命令需要指定端口，请使用 -p/--port".into())
 }
 
 #[derive(Parser, Debug)]
@@ -101,78 +111,86 @@ struct Args {
     #[arg(short, long, help = "设备端口号")]
     port: Option<String>,
 
-    #[arg(short, long, value_parser = clap::builder::PossibleValuesParser::new( ["flash", "erase", "merge", "flashx"]), help = "flash(烧录) erase(擦除) merge(合并) flashx(擦除后烧录)")]
-    command: Option<String>,
+    #[arg(
+        short,
+        long,
+        value_enum,
+        help = "flash(烧录) erase(擦除) merge(合并) flashx(擦除后烧录)"
+    )]
+    command: Option<EsptoolCommand>,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum EsptoolCommand {
+    /// 烧录固件
+    Flash,
+    /// 擦除 Flash
+    Erase,
+    /// 合并 bin
+    Merge,
+    /// 擦除后烧录
+    Flashx,
 }
 
 fn flash(esptool_path: &str, port: &str, erase: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let json_value = get_flasher_args()?;
-    let mut full_args = format!(
-        "{} -p {} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
-        esptool_path,
-        port,
-        json_value["chip"].as_str().unwrap(),
-        json_value["flasher_args"].as_str().unwrap()
+    let info = load_flasher_build_info()?;
+    let mut cmd = format!(
+        "{esptool_path} -p {port} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
+        info.chip, info.flash_args
     );
     if erase {
-        full_args.push_str(" --erase-all");
+        cmd.push_str(" --erase-all");
     }
-
-    run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
-
-    Ok(())
+    run_powershell(&cmd)
 }
 
 fn erase(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let full_args = format!("{} -p {} -b 1152000 erase-flash", esptool_path, port);
-    run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
-    Ok(())
+    run_powershell(&format!(
+        "{esptool_path} -p {port} -b 1152000 erase-flash"
+    ))
 }
 
 fn merge(esptool_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let current_dir = env::current_dir().unwrap();
-    let json_value = get_flasher_args()?;
-    let full_args = format!(
-        "{} -c {} merge-bin -o {}/full-{}.bin {}",
-        esptool_path,
-        json_value["chip"].as_str().unwrap(),
-        current_dir.display().to_string().as_str(),
-        current_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap(),
-        json_value["flasher_args"].as_str().unwrap()
-    );
-    run_shell_command("powershell.exe", &["-Command", &full_args.to_string()]);
-    Ok(())
+    let project_dir = project_dir()?;
+    let info = load_flasher_build_info()?;
+    let project_name = project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("无法解析当前目录名")?;
+
+    run_powershell(&format!(
+        "{esptool_path} -c {} merge-bin -o {}/full-{project_name}.bin {}",
+        info.chip,
+        project_dir.display(),
+        info.flash_args
+    ))
 }
 
 fn port_list() -> Result<(), Box<dyn std::error::Error>> {
-    run_shell_command(
-        "powershell.exe",
-        &[
-            "-Command",
-            "Get-WmiObject -Class Win32_SerialPort | Select-Object -ExpandProperty DeviceID",
-        ],
-    );
-    Ok(())
+    run_powershell(
+        "Get-WmiObject -Class Win32_SerialPort | Select-Object -ExpandProperty DeviceID",
+    )
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     port_list()?;
-    let esptool_path = env::var("ESPTOOL").expect("ESPTOOL WINDOWS路径环境变量未设置");
+
+    let esptool_path = env::var("ESPTOOL").map_err(|_| "未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）")?;
     let args = Args::parse();
+
     match args.command {
-        Some(command) => match command.to_string().as_str() {
-            "flash" => flash(&esptool_path, &args.port.unwrap(), false)?,
-            "erase" => erase(&esptool_path, &args.port.unwrap())?,
-            "merge" => merge(&esptool_path)?,
-            "flashx" => flash(&esptool_path, &args.port.unwrap(), true)?,
-            &_ => {
-                eprintln!("没有这个命令");
-            }
-        },
+        Some(EsptoolCommand::Flash) => {
+            flash(&esptool_path, require_port(&args.port)?, false)?;
+        }
+        Some(EsptoolCommand::Erase) => {
+            erase(&esptool_path, require_port(&args.port)?)?;
+        }
+        Some(EsptoolCommand::Merge) => merge(&esptool_path)?,
+        Some(EsptoolCommand::Flashx) => {
+            flash(&esptool_path, require_port(&args.port)?, true)?;
+        }
         None => {}
     }
+
     Ok(())
 }
