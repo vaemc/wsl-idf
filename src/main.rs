@@ -12,7 +12,14 @@ use std::process::{Command, ExitStatus, Stdio};
 #[derive(Debug, Deserialize)]
 struct FlasherArgsJson {
     flash_files: HashMap<String, String>,
+    app: Option<FlashAppEntry>,
     extra_esptool_args: ExtraEsptoolArgs,
+}
+
+#[derive(Debug, Deserialize)]
+struct FlashAppEntry {
+    offset: String,
+    file: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,26 +51,45 @@ fn project_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(env::current_dir()?)
 }
 
-fn load_flasher_build_info() -> Result<FlasherBuildInfo, Box<dyn std::error::Error>> {
+fn format_flash_arg(offset: &str, file: &str, windows_dir: &str) -> String {
+    let normalized = format!("build\\{}", file).replace('/', "\\");
+    format!("{offset} {windows_dir}\\{normalized}")
+}
+
+fn load_flasher_args_json() -> Result<(FlasherArgsJson, String), Box<dyn std::error::Error>> {
     let project_dir = project_dir()?;
     let windows_dir = wsl_to_windows_path(&project_dir)?;
-
     let json_path = project_dir.join("build/flasher_args.json");
     let root: FlasherArgsJson = serde_json::from_str(&fs::read_to_string(&json_path)?)?;
+    Ok((root, windows_dir))
+}
+
+fn load_flasher_build_info() -> Result<FlasherBuildInfo, Box<dyn std::error::Error>> {
+    let (root, windows_dir) = load_flasher_args_json()?;
 
     let flash_args = root
         .flash_files
         .iter()
-        .map(|(offset, file_path)| {
-            let normalized = format!("build\\{}", file_path).replace('/', "\\");
-            format!("{} {}\\{}", offset, windows_dir, normalized)
-        })
+        .map(|(offset, file_path)| format_flash_arg(offset, file_path, &windows_dir))
         .collect::<Vec<_>>()
         .join(" ");
 
     Ok(FlasherBuildInfo {
         chip: root.extra_esptool_args.chip,
         flash_args,
+    })
+}
+
+fn load_app_flash_info() -> Result<FlasherBuildInfo, Box<dyn std::error::Error>> {
+    let (root, windows_dir) = load_flasher_args_json()?;
+    let app = root
+        .app
+        .as_ref()
+        .ok_or("flasher_args.json 中缺少 app 字段")?;
+
+    Ok(FlasherBuildInfo {
+        chip: root.extra_esptool_args.chip,
+        flash_args: format_flash_arg(&app.offset, &app.file, &windows_dir),
     })
 }
 
@@ -171,7 +197,7 @@ struct Args {
         short,
         long,
         value_enum,
-        help = "flash(烧录) erase(擦除) merge(合并) flashx(擦除后烧录)"
+        help = "flash(烧录) flash-app(仅烧录app) flash-erase(擦除后烧录) erase(擦除) merge(合并)"
     )]
     command: Option<EsptoolCommand>,
 
@@ -189,7 +215,9 @@ enum EsptoolCommand {
     /// 合并 bin
     Merge,
     /// 擦除后烧录
-    Flashx,
+    FlashErase,
+    /// 仅烧录 app 分区固件
+    FlashApp,
 }
 
 fn flash(esptool_path: &str, port: &str, erase: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -203,6 +231,15 @@ fn flash(esptool_path: &str, port: &str, erase: bool) -> Result<(), Box<dyn std:
         cmd.push_str(" --erase-all");
     }
     run_powershell(&cmd)
+}
+
+fn flash_app(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error>> {
+    idf_build()?;
+    let info = load_app_flash_info()?;
+    run_powershell(&format!(
+        "{esptool_path} -p {port} -c {} -b 1152000 --before default-reset --after hard-reset write-flash --flash-mode dio {}",
+        info.chip, info.flash_args
+    ))
 }
 
 fn erase(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -248,8 +285,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             erase(&esptool_path, require_port(&args.port)?)?;
         }
         Some(EsptoolCommand::Merge) => merge(&esptool_path)?,
-        Some(EsptoolCommand::Flashx) => {
+        Some(EsptoolCommand::FlashErase) => {
             flash(&esptool_path, require_port(&args.port)?, true)?;
+        }
+        Some(EsptoolCommand::FlashApp) => {
+            flash_app(&esptool_path, require_port(&args.port)?)?;
         }
         None => {}
     }

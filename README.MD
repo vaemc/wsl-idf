@@ -24,7 +24,8 @@ alias wsl-idf='$HOME/rust-project/wsl-idf/target/release/wsl-idf'
 |------|------|
 | 烧录固件 | `wsl-idf -c flash -p COM1` |
 | 合并固件 | `wsl-idf -c merge -p COM1` |
-| 擦除后再烧录 | `wsl-idf -c flashx -p COM1` |
+| 仅烧录 app | `wsl-idf -c flash-app -p COM1` |
+| 擦除后再烧录 | `wsl-idf -c flash-erase -p COM1` |
 | 擦除 | `wsl-idf -c erase -p COM1` |
 
 ### 串口监视（monitor）
@@ -35,7 +36,8 @@ alias wsl-idf='$HOME/rust-project/wsl-idf/target/release/wsl-idf'
 |------|------|
 | 烧录后监视 | `wsl-idf -c flash -p COM1 monitor 115200` |
 | 合并后监视 | `wsl-idf -c merge -p COM1 monitor 9600` |
-| 擦除后烧录并监视 | `wsl-idf -c flashx -p COM1 monitor` |
+| 仅烧录 app 后监视 | `wsl-idf -c flash-app -p COM1 monitor 115200` |
+| 擦除后烧录并监视 | `wsl-idf -c flash-erase -p COM1 monitor` |
 | 擦除后监视 | `wsl-idf -c erase -p COM1 monitor 115200` |
 | 仅监视 | `wsl-idf -p COM1 monitor` |
 
