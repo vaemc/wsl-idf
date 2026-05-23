@@ -1,3 +1,7 @@
+// Copyright (c) 2025-2026 wheat. All rights reserved.
+// https://github.com/vaemc/wsl-idf
+
+mod branding;
 mod serial_output;
 
 use clap::{Parser, ValueEnum};
@@ -188,8 +192,16 @@ fn parse_monitor_trailing(trailing: &[String]) -> Result<Option<u32>, Box<dyn st
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    about,
+    long_about = None,
+    after_help = "作者信息: wsl-idf --about"
+)]
 struct Args {
+    #[arg(long, help = "显示作者 wheat 字符画与版权声明")]
+    about: bool,
+
     #[arg(short, long, help = "设备端口号")]
     port: Option<String>,
 
@@ -271,10 +283,16 @@ fn port_list() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    if args.about {
+        branding::print_about();
+        return Ok(());
+    }
+
     port_list()?;
 
     let esptool_path = env::var("ESPTOOL").map_err(|_| "未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）")?;
-    let args = Args::parse();
     let monitor_baud = parse_monitor_trailing(&args.trailing)?;
 
     match args.command {

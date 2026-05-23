@@ -2,6 +2,10 @@
 name = "wsl-idf"
 version = "0.1.0"
 edition = "2024"
+authors = ["wheat <vaemc520@qq.com>"]
+description = "Flash and monitor ESP-IDF firmware from WSL2 via Windows esptool"
+license = "MIT"
+repository = "https://github.com/vaemc/wsl-idf"
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 wheat. All rights reserved.
+
 use super::{EspLogLevel, message_body};
 use std::borrow::Cow;
 

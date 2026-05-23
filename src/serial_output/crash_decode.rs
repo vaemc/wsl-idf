@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 wheat. All rights reserved.
+
 use std::collections::HashSet;
 use std::env;
 use std::fs;

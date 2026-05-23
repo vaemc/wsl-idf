@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 wheat. All rights reserved.
+
 mod crash_decode;
 mod rules;
 
