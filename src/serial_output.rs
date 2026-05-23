@@ -1,3 +1,4 @@
+mod crash_decode;
 mod rules;
 
 use std::io::{self, Read, Write};
@@ -115,6 +116,7 @@ pub fn process_chunk(
     pending: &mut Vec<u8>,
     chunk: &[u8],
     out: &mut impl Write,
+    crash: &mut crash_decode::CrashMonitor,
 ) -> io::Result<()> {
     pending.extend_from_slice(chunk);
     while let Some(pos) = pending.iter().position(|&b| b == b'\n') {
@@ -124,6 +126,9 @@ pub fn process_chunk(
             line.pop();
         }
         write_line(out, &line)?;
+        if let Ok(text) = std::str::from_utf8(&line) {
+            crash.on_line(text, out)?;
+        }
     }
     Ok(())
 }
@@ -133,16 +138,20 @@ pub fn stream_colored<R: Read>(mut reader: R) -> io::Result<()> {
     let mut read_buf = [0u8; 1024];
     let mut pending = Vec::new();
     let mut out = io::stdout().lock();
+    let mut crash = crash_decode::CrashMonitor::new();
 
     loop {
         let n = reader.read(&mut read_buf)?;
         if n == 0 {
             if !pending.is_empty() {
                 write_line(&mut out, &pending)?;
+                if let Ok(text) = std::str::from_utf8(&pending) {
+                    crash.on_line(text, &mut out)?;
+                }
             }
             break;
         }
-        process_chunk(&mut pending, &read_buf[..n], &mut out)?;
+        process_chunk(&mut pending, &read_buf[..n], &mut out, &mut crash)?;
     }
 
     Ok(())
