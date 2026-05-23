@@ -515,16 +515,3 @@ Merged file is written to the **current project root**: `full-<directory-name>.b
 
 wsl-idf **does not replace** full ESP-IDF project management (menuconfig, clean, component deps, etc.)—use `idf.py` in WSL for those.
 
----
-
-## License
-
-See the LICENSE file in the repository if present. This is an ESP-IDF development helper; also follow Espressif and esptool licenses and documentation.
-
----
-
-## Links
-
-- [ESP-IDF Programming Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/)
-- [esptool Documentation](https://docs.espressif.com/projects/esptool/en/latest/)
-- [WSL Documentation](https://learn.microsoft.com/en-us/windows/wsl/)
