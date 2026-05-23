@@ -192,14 +192,9 @@ fn parse_monitor_trailing(trailing: &[String]) -> Result<Option<u32>, Box<dyn st
 }
 
 #[derive(Parser, Debug)]
-#[command(
-    version,
-    about,
-    long_about = None,
-    after_help = "作者信息: wsl-idf --about"
-)]
+#[command(version, about, long_about = None)]
 struct Args {
-    #[arg(long, help = "显示作者 wheat 字符画与版权声明")]
+    #[arg(long, help = "关于")]
     about: bool,
 
     #[arg(short, long, help = "设备端口号")]
