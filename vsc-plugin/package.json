@@ -1,0 +1,157 @@
+{
+  "name": "wsl-idf",
+  "displayName": "wsl-idf",
+  "description": "Status-bar driven helper for the wsl-idf CLI (flash / monitor ESP-IDF firmware from WSL2 via Windows esptool).",
+  "version": "0.1.0",
+  "publisher": "wheat",
+  "author": {
+    "name": "wheat",
+    "email": "vaemc520@qq.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vaemc/wsl-idf.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "esp-idf",
+    "esp32",
+    "wsl",
+    "esptool",
+    "wsl-idf"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "wsl-idf.selectPort",
+        "title": "wsl-idf: 选择串口 (COM Port)"
+      },
+      {
+        "command": "wsl-idf.refreshPorts",
+        "title": "wsl-idf: 刷新串口列表"
+      },
+      {
+        "command": "wsl-idf.setBaud",
+        "title": "wsl-idf: 设置 Monitor 波特率"
+      },
+      {
+        "command": "wsl-idf.toggleAutoMonitor",
+        "title": "wsl-idf: 切换 烧录后自动 Monitor"
+      },
+      {
+        "command": "wsl-idf.build",
+        "title": "wsl-idf: idf.py build"
+      },
+      {
+        "command": "wsl-idf.flash",
+        "title": "wsl-idf: Flash (烧录)"
+      },
+      {
+        "command": "wsl-idf.flashApp",
+        "title": "wsl-idf: Flash App Only (仅烧录 app)"
+      },
+      {
+        "command": "wsl-idf.flashErase",
+        "title": "wsl-idf: Erase + Flash (擦除后烧录)"
+      },
+      {
+        "command": "wsl-idf.erase",
+        "title": "wsl-idf: Erase Flash (擦除)"
+      },
+      {
+        "command": "wsl-idf.merge",
+        "title": "wsl-idf: Merge Bin (合并固件)"
+      },
+      {
+        "command": "wsl-idf.monitor",
+        "title": "wsl-idf: Monitor (串口监视)"
+      },
+      {
+        "command": "wsl-idf.menuconfig",
+        "title": "wsl-idf: idf.py menuconfig"
+      },
+      {
+        "command": "wsl-idf.clean",
+        "title": "wsl-idf: idf.py clean"
+      },
+      {
+        "command": "wsl-idf.fullclean",
+        "title": "wsl-idf: idf.py fullclean"
+      },
+      {
+        "command": "wsl-idf.about",
+        "title": "wsl-idf: 显示 About (WHEAT)"
+      },
+      {
+        "command": "wsl-idf.showMenu",
+        "title": "wsl-idf: 显示快捷菜单"
+      }
+    ],
+    "configuration": {
+      "title": "wsl-idf",
+      "properties": {
+        "wsl-idf.executable": {
+          "type": "string",
+          "default": "wsl-idf",
+          "description": "wsl-idf 可执行文件路径或命令名（必须在终端 PATH 中）"
+        },
+        "wsl-idf.port": {
+          "type": "string",
+          "default": "",
+          "description": "当前使用的 Windows COM 口，例如 COM3"
+        },
+        "wsl-idf.monitorBaud": {
+          "type": "number",
+          "default": 115200,
+          "description": "串口监视波特率"
+        },
+        "wsl-idf.autoMonitor": {
+          "type": "boolean",
+          "default": true,
+          "description": "烧录类命令完成后自动追加 monitor"
+        },
+        "wsl-idf.terminalName": {
+          "type": "string",
+          "default": "wsl-idf",
+          "description": "执行命令的终端名称（不存在时自动创建）"
+        },
+        "wsl-idf.reuseActiveTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "为 true 时直接在当前活动终端执行；为 false 时使用专用 wsl-idf 终端"
+        },
+        "wsl-idf.statusBar.priority": {
+          "type": "number",
+          "default": 100,
+          "description": "状态栏起始优先级（数值越大越靠左）"
+        },
+        "wsl-idf.statusBar.compact": {
+          "type": "boolean",
+          "default": false,
+          "description": "紧凑模式：仅显示端口与快捷菜单按钮"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
