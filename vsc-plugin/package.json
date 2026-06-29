@@ -73,6 +73,10 @@
         "title": "wsl-idf: Merge Bin (合并固件)"
       },
       {
+        "command": "wsl-idf.extractBins",
+        "title": "wsl-idf: Extract Bins (提取分区 bin)"
+      },
+      {
         "command": "wsl-idf.monitor",
         "title": "wsl-idf: Monitor (串口监视)"
       },

@@ -67,6 +67,12 @@ const ITEMS: ItemDef[] = [
     command: "wsl-idf.merge",
   },
   {
+    id: "extractBins",
+    text: () => "$(export) Extract",
+    tooltip: "wsl-idf -c extract-bins（提取分区 bin 到 flash-bins/）",
+    command: "wsl-idf.extractBins",
+  },
+  {
     id: "monitor",
     text: () => `$(terminal) Monitor`,
     tooltip: "wsl-idf monitor（按 Ctrl+C 退出）",

@@ -45,6 +45,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
   reg("wsl-idf.flashErase", () => flashCommand("flash-erase"));
   reg("wsl-idf.erase", () => flashCommand("erase"));
   reg("wsl-idf.merge", () => runWslIdf("merge"));
+  reg("wsl-idf.extractBins", () => runWslIdf("extract-bins"));
   reg("wsl-idf.monitor", () =>
     runWslIdf(null, { appendMonitor: true }),
   );
@@ -223,6 +224,7 @@ async function showQuickMenu(): Promise<void> {
     { label: "Erase + Flash", cmd: "wsl-idf.flashErase" },
     { label: "Erase Flash", cmd: "wsl-idf.erase" },
     { label: "Merge Bin", cmd: "wsl-idf.merge" },
+    { label: "Extract Bins (提取分区 bin)", cmd: "wsl-idf.extractBins" },
 
     { label: "$(terminal) 监视", kind: vscode.QuickPickItemKind.Separator },
     { label: "Open Monitor", cmd: "wsl-idf.monitor" },

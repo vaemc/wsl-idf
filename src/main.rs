@@ -173,6 +173,10 @@ fn require_port(port: &Option<String>) -> Result<&str, Box<dyn std::error::Error
         .ok_or("该命令需要指定端口，请使用 -p/--port".into())
 }
 
+fn require_esptool() -> Result<String, Box<dyn std::error::Error>> {
+    env::var("ESPTOOL").map_err(|_| "未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）".into())
+}
+
 const DEFAULT_MONITOR_BAUD: u32 = 115200;
 
 fn parse_monitor_trailing(trailing: &[String]) -> Result<Option<u32>, Box<dyn std::error::Error>> {
@@ -204,7 +208,7 @@ struct Args {
         short,
         long,
         value_enum,
-        help = "flash(烧录) flash-app(仅烧录app) flash-erase(擦除后烧录) erase(擦除) merge(合并)"
+        help = "flash(烧录) flash-app(仅烧录app) flash-erase(擦除后烧录) erase(擦除) merge(合并) extract-bins(提取分区bin)"
     )]
     command: Option<EsptoolCommand>,
 
@@ -225,6 +229,8 @@ enum EsptoolCommand {
     FlashErase,
     /// 仅烧录 app 分区固件
     FlashApp,
+    /// 提取各分区 bin 到 flash-bins/ 并附加烧录地址后缀
+    ExtractBins,
 }
 
 fn flash(esptool_path: &str, port: &str, erase: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -253,6 +259,67 @@ fn erase(esptool_path: &str, port: &str) -> Result<(), Box<dyn std::error::Error
     run_powershell(&format!(
         "{esptool_path} -p {port} -b 1152000 erase-flash"
     ))
+}
+
+fn parse_flash_offset(offset: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    let trimmed = offset.trim();
+    u64::from_str_radix(
+        trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+            .unwrap_or(trimmed),
+        16,
+    )
+    .map_err(|_| format!("无效的烧录地址: {offset}").into())
+}
+
+fn flash_bin_dest_name(file_path: &str, offset: &str) -> String {
+    let stem = Path::new(file_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("flash");
+    format!("{stem}_{offset}.bin")
+}
+
+fn extract_bins() -> Result<(), Box<dyn std::error::Error>> {
+    let project_dir = project_dir()?;
+    let (root, _) = load_flasher_args_json()?;
+    let out_dir = project_dir.join("flash-bins");
+
+    if out_dir.exists() {
+        fs::remove_dir_all(&out_dir)?;
+    }
+    fs::create_dir_all(&out_dir)?;
+
+    let mut entries: Vec<_> = root.flash_files.iter().collect();
+    entries.sort_by_key(|(offset, _)| parse_flash_offset(offset).unwrap_or(u64::MAX));
+
+    if entries.is_empty() {
+        return Err("flasher_args.json 中 flash_files 为空".into());
+    }
+
+    for (offset, file_path) in entries {
+        let src = project_dir.join("build").join(file_path);
+        if !src.exists() {
+            return Err(format!(
+                "源文件不存在: {}，请先执行 idf.py build",
+                src.display()
+            )
+            .into());
+        }
+
+        let dest_name = flash_bin_dest_name(file_path, offset);
+        let dest = out_dir.join(&dest_name);
+        fs::copy(&src, &dest)?;
+        println!("{} -> flash-bins/{}", src.display(), dest_name);
+    }
+
+    println!(
+        "已提取 {} 个 bin 到 {}/",
+        root.flash_files.len(),
+        out_dir.display()
+    );
+    Ok(())
 }
 
 fn merge(esptool_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -287,21 +354,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     port_list()?;
 
-    let esptool_path = env::var("ESPTOOL").map_err(|_| "未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）")?;
     let monitor_baud = parse_monitor_trailing(&args.trailing)?;
 
     match args.command {
+        Some(EsptoolCommand::ExtractBins) => extract_bins()?,
         Some(EsptoolCommand::Flash) => {
+            let esptool_path = require_esptool()?;
             flash(&esptool_path, require_port(&args.port)?, false)?;
         }
         Some(EsptoolCommand::Erase) => {
+            let esptool_path = require_esptool()?;
             erase(&esptool_path, require_port(&args.port)?)?;
         }
-        Some(EsptoolCommand::Merge) => merge(&esptool_path)?,
+        Some(EsptoolCommand::Merge) => {
+            let esptool_path = require_esptool()?;
+            merge(&esptool_path)?;
+        }
         Some(EsptoolCommand::FlashErase) => {
+            let esptool_path = require_esptool()?;
             flash(&esptool_path, require_port(&args.port)?, true)?;
         }
         Some(EsptoolCommand::FlashApp) => {
+            let esptool_path = require_esptool()?;
             flash_app(&esptool_path, require_port(&args.port)?)?;
         }
         None => {}

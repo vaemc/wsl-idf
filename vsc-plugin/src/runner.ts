@@ -38,7 +38,10 @@ export function runWslIdf(
   }
 
   const needsPort =
-    subcommand !== null && subcommand !== "merge" && subcommand !== "about";
+    subcommand !== null &&
+    subcommand !== "merge" &&
+    subcommand !== "extract-bins" &&
+    subcommand !== "about";
   if (needsPort || opts.appendMonitor) {
     if (!cfg.port) {
       void vscode.window
