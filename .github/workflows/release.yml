@@ -1,0 +1,121 @@
+name: Build Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  APP_SLUG: wsl-idf
+  APP_TITLE: wsl-idf
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: vsc-plugin/package-lock.json
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build Rust CLI
+        run: cargo build --release
+
+      - name: Build VS Code extension
+        working-directory: vsc-plugin
+        run: |
+          npm ci
+          npm run compile
+          npx --yes @vscode/vsce package --no-dependencies
+
+      - name: Rename release assets
+        shell: bash
+        env:
+          APP_SLUG: ${{ env.APP_SLUG }}
+        run: node .github/scripts/rename-release-assets.mjs "${{ matrix.platform }}" "${{ steps.version.outputs.version }}"
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          SLUG="${{ env.APP_SLUG }}"
+          TITLE="${{ env.APP_TITLE }}"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "${TITLE} v${VERSION}" \
+              --notes "WSL2 ESP-IDF 烧录与监视工具（自动构建）
+
+          | 产物 | 文件名 |
+          | --- | --- |
+          | Linux amd64 CLI（WSL2） | \`${SLUG}-${VERSION}-linux-amd64\` |
+          | VS Code 扩展 | \`${SLUG}-${VERSION}.vsix\` |
+
+          ### 安装
+
+          **CLI（WSL2）**
+          \`\`\`bash
+          curl -fsSL -o wsl-idf https://github.com/vaemc/wsl-idf/releases/download/${TAG}/${SLUG}-${VERSION}-linux-amd64
+          chmod +x wsl-idf
+          sudo mv wsl-idf /usr/local/bin/
+          \`\`\`
+
+          **VS Code 扩展**
+          \`\`\`bash
+          code --install-extension ${SLUG}-${VERSION}.vsix
+          \`\`\`"
+          fi
+
+          if [ ! -s .github/release-assets.txt ]; then
+            echo "No release assets found"
+            find target/release -maxdepth 1 -type f 2>/dev/null || true
+            find vsc-plugin -name '*.vsix' 2>/dev/null || true
+            exit 1
+          fi
+
+          UPLOAD=()
+          while IFS= read -r file; do
+            if [ -n "$file" ] && [ -f "$file" ]; then
+              UPLOAD+=("$file")
+            fi
+          done < .github/release-assets.txt
+
+          if [ ${#UPLOAD[@]} -eq 0 ]; then
+            echo "Release asset list is empty"
+            cat .github/release-assets.txt || true
+            exit 1
+          fi
+
+          gh release upload "$TAG" "${UPLOAD[@]}" --clobber
