@@ -37,7 +37,7 @@
 
 ## 概述
 
-ESP-IDF 工具链可在 WSL 中编译工程，但 USB 串口通常挂在 Windows 主机上，WSL 无法直接打开 `COMx`。`wsl-idf` 在 WSL 内调用 `idf.py build`（部分子命令），读取 `build/flasher_args.json`，经 `wslpath -w` 转换路径后，通过 `powershell.exe` 调用 Windows 上的 `esptool` 与串口。
+ESP-IDF 工具链可在 WSL 中编译工程，但 USB 串口通常挂在 Windows 主机上，WSL2 无法直接打开 `COMx`。`wsl-idf` 在 WSL 内调用 `idf.py build`（部分子命令），读取 `build/flasher_args.json`，经 `wslpath -w` 转换路径后，通过 `powershell.exe` 调用 Windows 上的 `esptool` 与串口。
 
 模块划分：
 

@@ -37,7 +37,7 @@ This repository also includes a VS Code status-bar extension; see [`vsc-plugin/`
 
 ## Overview
 
-ESP-IDF builds fine in WSL, but USB serial adapters usually appear as Windows `COMx` ports that WSL cannot open directly. `wsl-idf` runs `idf.py build` when needed, reads `build/flasher_args.json`, converts paths with `wslpath -w`, and invokes Windows `esptool` / serial I/O via `powershell.exe`.
+ESP-IDF builds fine in WSL, but USB serial adapters usually appear as Windows `COMx` ports that WSL2 cannot open directly. `wsl-idf` runs `idf.py build` when needed, reads `build/flasher_args.json`, converts paths with `wslpath -w`, and invokes Windows `esptool` / serial I/O via `powershell.exe`.
 
 | Area | Contents |
 |------|----------|
