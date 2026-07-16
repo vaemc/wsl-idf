@@ -15,7 +15,7 @@ const WHEAT_ASCII: &str = r#"
 
 pub fn print_about() {
     println!("\x1b[33m{WHEAT_ASCII}\x1b[0m");
-    println!("wsl-idf — ESP-IDF flash & monitor from WSL2");
+    println!("wsl-idf — Flash & monitor ESP-IDF from WSL2 via Windows COM");
     println!();
     println!("Author:  {AUTHOR} <{EMAIL}>");
     println!("{COPYRIGHT}");
