@@ -2,111 +2,110 @@
 
 [中文](./README.MD) | **English**
 
-wsl-idf helps you develop ESP-IDF projects in WSL2 while your board is connected via Windows COM ports.
-Build in WSL with idf.py; flash, erase, merge firmware, and open a serial monitor through Windows esptool.exe — no manual path juggling.
-Commands mirror idf.py flash / monitor, with log coloring and automatic crash addr2line decoding.
+A command-line tool (Rust / clap) for flashing, erasing, merging firmware, and serial monitoring of ESP-IDF projects developed in WSL2, using Windows-side `esptool` and COM ports.
+
+This repository also includes a VS Code status-bar extension; see [`vsc-plugin/`](./vsc-plugin/README.md). This document covers the CLI only.
 
 ---
 
 ## Table of Contents
 
-- [Background & Use Cases](#background--use-cases)
-- [Features](#features)
+- [Overview](#overview)
+- [Feature Summary](#feature-summary)
 - [Requirements](#requirements)
-- [Installation & Build](#installation--build)
+- [Installation](#installation)
 - [Configuration](#configuration)
-- [Quick Start](#quick-start)
+- [Global Behavior](#global-behavior)
 - [Command Reference](#command-reference)
-- [Serial Monitor](#serial-monitor)
-- [Automatic Crash Address Decoding](#automatic-crash-address-decoding)
+  - [Common Options](#common-options)
+  - [flash](#flash)
+  - [flash-app](#flash-app)
+  - [flash-erase](#flash-erase)
+  - [erase](#erase)
+  - [merge](#merge)
+  - [extract-bins](#extract-bins)
+  - [Serial Monitor (Trailing Args)](#serial-monitor-trailing-args)
+- [Monitor: Log Coloring](#monitor-log-coloring)
+- [Monitor: Crash Address Decoding](#monitor-crash-address-decoding)
+- [Output Paths](#output-paths)
 - [How It Works](#how-it-works)
-- [Typical Workflows](#typical-workflows)
+- [Comparison with idf.py](#comparison-with-idfpy)
 - [FAQ](#faq)
+- [Feature Status](#feature-status)
 
 ---
 
-## Background & Use Cases
+## Overview
 
-The official ESP-IDF toolchain runs smoothly on Linux/WSL, but USB-to-serial adapters are usually attached to the **Windows host**, and WSL cannot access `COM` ports directly. Common workarounds:
+ESP-IDF builds fine in WSL, but USB serial adapters usually appear as Windows `COMx` ports that WSL cannot open directly. `wsl-idf` runs `idf.py build` when needed, reads `build/flasher_args.json`, converts paths with `wslpath -w`, and invokes Windows `esptool` / serial I/O via `powershell.exe`.
 
-- Install a separate ESP-IDF / esptool stack on Windows; or
-- Manually switch terminals, copy paths, and stitch together esptool arguments.
+| Area | Contents |
+|------|----------|
+| Firmware ops | `flash` / `flash-app` / `flash-erase` / `erase` / `merge` / `extract-bins` |
+| Serial monitor | Trailing `monitor [baud]`; PowerShell reads COM; local coloring and crash decode |
+| Helpers | Lists COM ports on startup; `--about` prints author and repo |
 
-**wsl-idf** lets you **build with `idf.py` in WSL** while **flashing and monitoring go through Windows `esptool.exe` and COM ports**, with a CLI experience close to `idf.py flash` / `idf.py monitor`.
-
-Good fit when:
-
-| Scenario | Description |
-|----------|-------------|
-| WSL2 + ESP-IDF development | Code and builds in WSL; USB hardware on Windows |
-| Windows esptool already available | No need to set up USB serial forwarding in WSL |
-| Daily flash + debug | One command for flash / app-only flash / erase / merge / monitor |
+Working directory must be the **ESP-IDF project root**.
 
 ---
 
-## Features
+## Feature Summary
 
-### Firmware Operations
-
-| Command | Description |
-|---------|-------------|
-| **flash** | Runs `idf.py build`, then flashes all partitions from `build/flasher_args.json` |
-| **flash-app** | Runs `idf.py build`, then flashes only the `app` partition (faster iteration when partition table/bootloader unchanged) |
-| **flash-erase** | Runs `idf.py build`, then full-chip erase (`--erase-all`) followed by a complete flash |
-| **erase** | Erases flash only; no build, no flash |
-| **merge** | Merges partition bins into a single `full-<project-name>.bin` (no COM port required) |
-
-### Serial Monitor
-
-- Opens COM ports via Windows PowerShell with UTF-8 output
-- **Automatic ESP-IDF log coloring** (E/W/I/D/V levels, similar palette to `idf.py monitor`)
-- **`@@@` prefix custom highlight** (Info logs shown in purple with the marker stripped)
-- **Crash detection + automatic addr2line decoding** (Guru Meditation, watchdog, assert, etc.)
-
-### Other
-
-- Lists available **COM ports** on Windows at startup to help pick `-p`
-- Reads chip type, flash offsets, and file paths automatically—no manual esptool args
-- Converts WSL paths with `wslpath -w` before passing them to esptool on Windows
+| Capability | Entry | Notes |
+|------------|-------|-------|
+| Full flash | `-c flash -p COMx` | Runs `idf.py build`, then flashes all partitions from `flasher_args.json` |
+| App-only flash | `-c flash-app -p COMx` | Build, then flash `app` only |
+| Erase then flash | `-c flash-erase -p COMx` | Build, then `write-flash ... --erase-all` |
+| Erase only | `-c erase -p COMx` | `erase-flash`; no build, no flash |
+| Merge bins | `-c merge` | Writes `full-<dirname>.bin` at project root; no port |
+| Extract partition bins | `-c extract-bins` | Copies into `flash-bins/` with offset suffix; no port or `ESPTOOL` |
+| Serial monitor | `-p COMx monitor [baud]` | Alone or after a `-c` command |
+| List COM ports | (no `-c`, no monitor) | Prints Windows serial ports only |
+| About | `--about` | Author, copyright, repo; then exit |
 
 ---
 
 ## Requirements
 
-### WSL Side
+### WSL side
 
-- WSL2 (Ubuntu or similar recommended)
-- **ESP-IDF** installed and sourced (includes `idf.py`)
-- **Rust toolchain** (to build this tool; not needed if using a prebuilt binary)
-- Current working directory must be the **ESP-IDF project root** (with `CMakeLists.txt`, `sdkconfig`, etc.)
+| Item | Requirement |
+|------|-------------|
+| Environment | WSL2 (Ubuntu or similar recommended) |
+| ESP-IDF | Installed and `source`d in the current shell (`idf.py` available) |
+| Working directory | ESP-IDF project root |
+| Building this tool | Rust toolchain (not needed for a prebuilt binary) |
+| Path conversion | `wslpath` available |
+| Crash decode (optional) | `build/*.elf` present; matching `*-addr2line` findable |
 
-### Windows Side
+### Windows side
 
-- **esptool** executable (e.g. `esptool.exe` or the official `esptool-windows-amd64` package)
-- **PowerShell** (invoked from WSL via `powershell.exe`)
-- ESP board USB drivers installed; COM port visible in Device Manager
+| Item | Requirement |
+|------|-------------|
+| esptool | Executable (e.g. `esptool.exe`); path in `ESPTOOL` |
+| PowerShell | Invokable as `powershell.exe` from WSL |
+| Drivers | Board USB drivers installed; COM visible in Device Manager |
 
-### Crash Decoding (Optional)
-
-- Project has been built with `idf.py build`; `build/*.elf` exists
-- Matching `*-addr2line` available in WSL (usually after `source $IDF_PATH/export.sh`)
+Commands `flash` / `flash-app` / `flash-erase` / `erase` / `merge` require `ESPTOOL`. `extract-bins` and monitor-only do not.
 
 ---
 
-## Installation & Build
+## Installation
+
+Build from source:
 
 ```bash
-git clone <repo-url> ~/rust-project/wsl-idf
-cd ~/rust-project/wsl-idf
+git clone https://github.com/vaemc/wsl-idf.git
+cd wsl-idf
 cargo build --release
 ```
 
-Binary: `target/release/wsl-idf`
+Binary: `target/release/wsl-idf`.
 
-Recommended shell alias (`~/.bashrc` or `~/.zshrc`):
+Optional alias in `~/.bashrc` / `~/.zshrc`:
 
 ```bash
-alias wsl-idf='$HOME/rust-project/wsl-idf/target/release/wsl-idf'
+alias wsl-idf='$HOME/path/to/wsl-idf/target/release/wsl-idf'
 ```
 
 Verify:
@@ -116,389 +115,339 @@ wsl-idf --help
 wsl-idf --version
 ```
 
+Current version (from the binary): `0.1.0`.
+
 ---
 
 ## Configuration
 
-### 1. ESPTOOL Environment Variable (Required)
+### Environment variable `ESPTOOL` (required for flash / erase / merge)
 
-Points to the **Windows** esptool executable. Use Windows-style paths from WSL:
+Windows path to esptool, written in the WSL shell:
 
 ```bash
 export ESPTOOL='D:\\esptool-windows-amd64\\esptool.exe'
 ```
 
-Notes:
+| Item | Notes |
+|------|-------|
+| Location | Must be reachable from Windows (`C:\`, `D:\`, …) |
+| Backslashes | Use `\\` in the shell, or suitable quoting |
+| Persist | Add to `~/.bashrc` / `~/.zshrc` |
+| If unset | `未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）` |
 
-- Path must be reachable from Windows (`C:\`, `D:\`, etc.)
-- Escape backslashes as `\\` in the shell, or use appropriate quoting
-- Add the `export` to `~/.bashrc` / `~/.zshrc` to persist
-
-If unset, the tool errors with: `未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）`
-
-### 2. ESP-IDF Environment (WSL)
-
-Before working on an ESP project in a new terminal:
+### ESP-IDF environment
 
 ```bash
 source ~/esp/esp-idf/export.sh   # adjust to your install path
 ```
 
-Flashing requires a working `idf.py build`; crash decoding needs `riscv32-esp-elf-addr2line` or `xtensa-*-addr2line` on PATH.
+### Confirm COM port
 
-### 3. Confirm COM Port
-
-After connecting the board, check **Device Manager → Ports (COM & LPT)** on Windows for the port number, e.g. `COM3`, `COM20`.
-
-Every `wsl-idf` run prints currently visible serial ports (from `Win32_SerialPort`), for example:
-
-```
-COM1
-COM3
-COM20
-```
+1. Windows Device Manager → Ports (COM & LPT)
+2. Or run `wsl-idf` with no subcommand to list `Win32_SerialPort` DeviceIDs
 
 ---
 
-## Quick Start
+## Global Behavior
 
-```bash
-# 1. Enter ESP-IDF project root
-cd ~/projects/my-esp-project
-
-# 2. Load IDF environment
-source ~/esp/esp-idf/export.sh
-
-# 3. Confirm ESPTOOL is set
-echo $ESPTOOL
-
-# 4. Build and flash (runs idf.py build internally)
-wsl-idf -c flash -p COM3
-
-# 5. Flash then open serial monitor (default 115200)
-wsl-idf -c flash -p COM3 monitor
-
-# 6. Monitor only (no flash)
-wsl-idf -p COM3 monitor
-```
+1. Except for `--about`, every run lists Windows COM ports first.
+2. `--about` prints branding and exits; no port list, no other actions.
+3. Trailing `monitor` or `monitor <baud>`: run the `-c` action (if any), then open the monitor.
+4. `monitor` requires `-p` / `--port`.
+5. Default monitor baud: `115200`. Exit with Ctrl+C (PowerShell closes the port).
 
 ---
 
 ## Command Reference
 
-### Global Options
+### Common Options
 
 ```
 Usage: wsl-idf [OPTIONS] [TRAILING]...
 
 Options:
-  -p, --port <PORT>        Device port (Windows COM port, e.g. COM3)
-  -c, --command <COMMAND>  Flash subcommand (see table below)
-  -h, --help               Help
-  -V, --version            Version
+      --about              About
+  -p, --port <PORT>        Device port (Windows COM, e.g. COM3)
+  -c, --command <COMMAND>  See table below
+  -h, --help
+  -V, --version
 
 Arguments:
-  [TRAILING]...            Serial monitor after command: monitor [baud]
+  [TRAILING]...            monitor [baud]
 ```
 
-### Subcommands `-c / --command`
+| `-c` value | Needs `-p` | Needs `ESPTOOL` | Auto `idf.py build` | Role |
+|------------|------------|-----------------|---------------------|------|
+| `flash` | yes | yes | yes | Flash all `flash_files` partitions |
+| `flash-app` | yes | yes | yes | Flash `app` only |
+| `flash-erase` | yes | yes | yes | Full erase then complete flash |
+| `erase` | yes | yes | no | Erase flash only |
+| `merge` | no | yes | no | Merge into one bin |
+| `extract-bins` | no | no | no | Extract bins into `flash-bins/` |
 
-| Subcommand | Requires `-p` | Auto `idf.py build` | Action |
-|------------|---------------|---------------------|--------|
-| `flash` | Yes | Yes | Flash bootloader, partition table, app, and all partitions from `flasher_args.json` |
-| `flash-app` | Yes | Yes | Flash app partition only |
-| `flash-erase` | Yes | Yes | Full-chip erase then complete flash |
-| `erase` | Yes | No | Run `erase-flash` only |
-| `merge` | No | No | Merge bins to `full-<project-name>.bin` in project directory |
+With neither `-c` nor `monitor`: only print the COM list.
 
-### Flash Command Examples
+### Fixed flash parameters
 
-```bash
-# Full flash
-wsl-idf -c flash -p COM3
+For `flash` / `flash-app` / `flash-erase`, the assembled esptool invocation uses:
 
-# App-only flash (faster dev iteration)
-wsl-idf -c flash-app -p COM3
+| Parameter | Default |
+|-----------|---------|
+| Baud `-b` | `1152000` |
+| `--before` | `default-reset` |
+| `--after` | `hard-reset` |
+| `--flash-mode` | `dio` |
+| Chip `-c` | From `build/flasher_args.json` → `extra_esptool_args.chip` |
+| Offsets / files | From `flash_files` or `app` in the same file |
 
-# Erase entire flash then re-flash (partition table change, clear NVS, etc.)
-wsl-idf -c flash-erase -p COM3
-
-# Erase only, no flash
-wsl-idf -c erase -p COM3
-
-# Merge firmware (single file for production or OTA prep)
-wsl-idf -c merge
-# Output example: ~/projects/my-esp-project/full-my-esp-project.bin
-```
-
-### Fixed Flash Parameters (Internal)
-
-For `flash` / `flash-app` / `flash-erase`, wsl-idf assembles esptool calls like (offsets/partitions from `build/flasher_args.json`):
-
-- Baud rate: `-b 1152000`
-- Reset: `--before default-reset --after hard-reset`
-- Flash mode: `--flash-mode dio`
-- Chip: from `extra_esptool_args.chip` in `flasher_args.json`
-
-You generally **do not** need to specify these manually.
-
-### List Ports / Monitor Only
-
-```bash
-# Print COM port list only (no -c → no other action)
-wsl-idf
-
-# Open serial monitor, default 115200
-wsl-idf -p COM3 monitor
-
-# Custom baud rate
-wsl-idf -p COM3 monitor 9600
-```
-
-### Flash + Monitor Combinations
-
-Append `monitor` or `monitor <baud>` at the end. The `-c` action runs **first**, then monitoring starts. `-p` is required when using `monitor`.
-
-| Scenario | Command |
-|----------|---------|
-| Flash then monitor | `wsl-idf -c flash -p COM3 monitor` |
-| Flash then monitor (9600) | `wsl-idf -c flash -p COM3 monitor 9600` |
-| App flash then monitor | `wsl-idf -c flash-app -p COM3 monitor 115200` |
-| Erase, flash, then monitor | `wsl-idf -c flash-erase -p COM3 monitor` |
-| Erase then monitor | `wsl-idf -c erase -p COM3 monitor 115200` |
-| Monitor only | `wsl-idf -p COM3 monitor` |
-
-Press **Ctrl+C** to exit monitoring; the PowerShell script closes the serial port.
+These are not exposed as CLI overrides.
 
 ---
 
-## Serial Monitor
+### flash
 
-### Log Coloring
+**Purpose**: Build, then flash all partitions from the build artifacts.
 
-Monitor output recognizes standard ESP-IDF log format, for example:
+**Entry**: `wsl-idf -c flash -p <COM>`
 
+**Prerequisites**: ESP-IDF sourced; `ESPTOOL` set; project root; correct COM port.
+
+**Flow**: `idf.py build` → read `flasher_args.json` → convert paths → `write-flash`.
+
+**Examples**:
+
+```bash
+wsl-idf -c flash -p COM3
+wsl-idf -c flash -p COM3 monitor
 ```
-I (637787) wifi: station connected
-E (640797) main: [ERROR] connection failed
-W (643817) heap: memory usage high
+
+**Risk**: Overwrites Flash partitions on the connected device. Confirm the port first.
+
+---
+
+### flash-app
+
+**Purpose**: Flash the application partition only (faster when partition table / bootloader unchanged).
+
+**Entry**: `wsl-idf -c flash-app -p <COM>`
+
+**Prerequisites**: Same as flash; `flasher_args.json` must contain `app` (`offset`, `file`).
+
+**Flow**: `idf.py build` → flash `app` entry only.
+
+**Example**:
+
+```bash
+wsl-idf -c flash-app -p COM3 monitor
 ```
 
-Levels and ANSI colors:
+**Limit**: Missing `app` → `flasher_args.json 中缺少 app 字段`; use `flash` instead.
+
+---
+
+### flash-erase
+
+**Purpose**: Full-chip erase followed by a complete flash (partition table changes, clear NVS, etc.).
+
+**Entry**: `wsl-idf -c flash-erase -p <COM>`
+
+**Flow**: `idf.py build` → `write-flash ... --erase-all`.
+
+**Risk**: **Destructive.** `--erase-all` wipes the entire Flash. Confirm the target board.
+
+---
+
+### erase
+
+**Purpose**: Erase Flash only; no build, no program.
+
+**Entry**: `wsl-idf -c erase -p <COM>`
+
+**Prerequisites**: `ESPTOOL` and COM; does not need `flasher_args.json`.
+
+**Flow**: esptool `erase-flash` at baud `1152000`.
+
+**Risk**: **Destructive.** Full-chip erase; data is not recoverable.
+
+---
+
+### merge
+
+**Purpose**: Merge partition bins into one firmware file.
+
+**Entry**: `wsl-idf -c merge`
+
+**Prerequisites**:
+
+1. `ESPTOOL` set
+2. `build/flasher_args.json` and bins already present (**does not** auto-build)
+3. No `-p` required
+
+**Output**: `full-<current-directory-name>.bin` at the project root  
+e.g. folder `my-esp-project` → `full-my-esp-project.bin`.
+
+**Example**:
+
+```bash
+idf.py build   # if not already built
+wsl-idf -c merge
+```
+
+---
+
+### extract-bins
+
+**Purpose**: Copy each partition bin from `build/` into `flash-bins/`, with the flash offset in the filename.
+
+**Entry**: `wsl-idf -c extract-bins`
+
+**Prerequisites**:
+
+1. `build/flasher_args.json` with non-empty `flash_files`
+2. Source bins under `build/` (**does not** auto-build)
+3. No `-p`, no `ESPTOOL`
+
+**Flow**:
+
+1. If `flash-bins/` exists, **delete the whole directory**, then recreate it
+2. Copy files sorted by flash offset
+3. Print `src -> flash-bins/dest`
+
+**Naming**: `{original-stem}_{offset}.bin`  
+e.g. `bootloader_0x0.bin`, `partition-table_0x8000.bin`
+
+**Example**:
+
+```bash
+idf.py build
+wsl-idf -c extract-bins
+```
+
+**Risk**: Each run wipes `flash-bins/`. Custom files in that directory are removed.
+
+---
+
+### Serial Monitor (Trailing Args)
+
+**Purpose**: Open a Windows COM port and show device output (UTF-8) in the terminal.
+
+| Scenario | Command |
+|----------|---------|
+| Monitor only | `wsl-idf -p COM3 monitor` |
+| Custom baud | `wsl-idf -p COM3 monitor 9600` |
+| Flash then monitor | `wsl-idf -c flash -p COM3 monitor` |
+| App flash then monitor | `wsl-idf -c flash-app -p COM3 monitor 115200` |
+
+| Parameter | Meaning | Default |
+|-----------|---------|---------|
+| `-p` / `--port` | Windows COM | required |
+| baud after `monitor` | Serial baud rate | `115200` |
+
+PowerShell prints port name, baud, and a Ctrl+C exit hint when the port opens.
+
+**Limits**: Trailing args only accept `monitor` or `monitor <baud>`; invalid baud fails; no interactive send / idf.py-monitor keybindings.
+
+---
+
+## Monitor: Log Coloring
+
+ESP-IDF log lines (`I (637787) wifi: ...`) are colored (ANSI, similar to `idf.py monitor`):
 
 | Level | Char | Color |
 |-------|------|-------|
-| Error | E | Red |
-| Warn | W | Yellow |
-| Info | I | Green |
-| Debug | D | Cyan |
-| Verbose | V | Gray |
+| Error | E | red |
+| Warn | W | yellow |
+| Info | I | green |
+| Debug | D | cyan |
+| Verbose | V | gray |
 
-### Custom Highlight: `@@@` Marker
+### Custom highlight: `@@@`
 
-If an Info-level log body starts with `@@@`, it is shown in **purple** and the prefix is stripped—useful for highlighting key lines in noisy output:
+Info-level message bodies starting with `@@@` are shown in purple with the prefix stripped:
 
 ```
-# Device prints
+# Device
 I (1000) LOG_DEMO: @@@custom highlight
 
-# Terminal shows (purple, no @@@)
+# Terminal (purple, no @@@)
 I (1000) LOG_DEMO: custom highlight
 ```
 
-In firmware:
+Firmware:
 
 ```c
 ESP_LOGI(TAG, "@@@%s", "custom highlight");
 ```
 
+Non-ESP-IDF lines pass through unchanged.
+
 ---
 
-## Automatic Crash Address Decoding
+## Monitor: Crash Address Decoding
 
-While monitoring, wsl-idf watches for ESP crash-related log lines. After a crash block ends, it collects **hex addresses**, runs **addr2line** in WSL, and inserts output like:
+On crash log blocks, addresses are collected and decoded with WSL `addr2line`. Output includes:
 
 ```
 --- wsl-idf addr2line ---
-<function names, file paths, line numbers, etc.>
 ```
 
-### Start Triggers
+### Start markers (enter collection)
 
-Enters “crash collection” when a line contains any of:
+Any of: `Guru Meditation Error`, `register dump`, `Backtrace:`, `abort() was called`, `Stack memory:`, `Task watchdog got triggered`, `assert failed`, `Panic handler`.
 
-- `Guru Meditation Error`
-- `register dump`
-- `Backtrace:`
-- `abort() was called`
-- `Stack memory:`
-- `Task watchdog got triggered`
-- `assert failed`
-- `Panic handler`
+### End markers (run decode)
 
-### End Triggers
+Any of: `Please enable CONFIG_ESP_SYSTEM_USE_FRAME_POINTER`, `ELF file SHA256`, `Rebooting...`, `Backtrace stopped`.
 
-- `Please enable CONFIG_ESP_SYSTEM_USE_FRAME_POINTER`
-- `ELF file SHA256`
-- `Rebooting...`
-- `Backtrace stopped`
+### Address rules
 
-### Address Sources
+- Collect `0x…` hex addresses of sufficient length
+- On `Backtrace:` lines, take PC from each `PC:SP` pair
+- Skip: `0x00000000`, `0xdeadc0de`, `0xdeadbeef`, `0xabababab`, `0xcdcdcdcd`
+- Invoke: `addr2line -pfiaC -e <elf> <addrs...>`
 
-- `0x........` addresses in register dumps and exception info
-- **PC** part of `PC:SP` pairs on `Backtrace:` lines
-- Placeholder addresses ignored: `0x00000000`, `0xdeadc0de`, `0xdeadbeef`, etc.
+### Lookup order
 
-### Prerequisites
+| Resource | Order |
+|----------|-------|
+| ELF | ① `app_elf` in `build/project_description.json`; ② `build/<dirname>.elf`; ③ any `.elf` under `build/` |
+| addr2line | ① `CMAKE_ADDR2LINE` in `build/CMakeCache.txt`; ② PATH candidates: `riscv32-esp-elf-addr2line`, `xtensa-esp32s3-elf-addr2line`, `xtensa-esp32s2-elf-addr2line`, `xtensa-esp32-elf-addr2line`, `xtensa-esp-elf-addr2line` |
 
-1. Run monitor from the **ESP-IDF project root** (needs `build/`)
-2. ELF present: prefer `app_elf` in `build/project_description.json`, else `build/<project-name>.elf`
-3. addr2line found: prefer `CMAKE_ADDR2LINE` in `build/CMakeCache.txt`, else search PATH for `riscv32-esp-elf-addr2line`, `xtensa-esp32-elf-addr2line`, etc.
+If unavailable, a yellow stderr notice is printed; monitoring still works.
 
-If prerequisites are missing, monitor still works but prints a warning at startup:
+**Note**: ELF must match the firmware on the device. For fuller backtraces, enable `CONFIG_ESP_SYSTEM_USE_FRAME_POINTER` in `sdkconfig`.
 
-```
-wsl-idf: 崩溃地址自动解析未启用（未找到 build/*.elf）
-```
+---
 
-### Tips
+## Output Paths
 
-- Ensure **`idf.py build` matches the firmware on the device** before reproducing a crash, or line numbers may be wrong
-- Enable `CONFIG_ESP_SYSTEM_USE_FRAME_POINTER` in `sdkconfig` for fuller backtraces
+| Path | Produced by | Notes |
+|------|-------------|-------|
+| `build/flasher_args.json` | ESP-IDF / `idf.py build` | Offsets, files, chip |
+| `build/*.bin`, `build/*.elf` | ESP-IDF | Flash / decode inputs |
+| `full-<dirname>.bin` | `merge` | Project root |
+| `flash-bins/*.bin` | `extract-bins` | Directory wiped each run |
+
+No separate config file; uses `ESPTOOL` and CLI args.
 
 ---
 
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        WSL2                                 │
-│  ┌──────────────┐    ┌─────────────────┐    ┌──────────────┐  │
-│  │   wsl-idf    │───▶│  idf.py build   │    │  addr2line   │  │
-│  │   (Rust)     │    │  (before flash) │    │  (crashes)   │  │
-│  └──────┬───────┘    └─────────────────┘    └──────────────┘  │
-│         │ reads build/flasher_args.json                       │
-│         │ wslpath -w for project path                         │
-│         ▼                                                     │
-│  ┌──────────────┐                                             │
-│  │ powershell.exe│                                            │
-│  └──────┬───────┘                                             │
-└─────────┼─────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Windows                                │
-│  ┌──────────────┐         ┌──────────────┐                  │
-│  │  esptool.exe │────────▶│  COMx USB    │──▶ ESP chip      │
-│  └──────────────┘         └──────────────┘                  │
-│  ┌──────────────┐                                            │
-│  │ SerialPort   │◀── monitor reads COM ──▶ colored WSL output  │
-│  └──────────────┘                                            │
-└─────────────────────────────────────────────────────────────┘
+WSL2                              Windows
+┌─────────────┐                   ┌──────────────┐
+│  wsl-idf    │──idf.py build──▶  │              │
+│             │──wslpath -w──▶    │  esptool.exe │──▶ COMx ──▶ ESP
+│             │──powershell.exe─▶ │  SerialPort  │──▶ serial data back
+│  addr2line  │◀─crash decode     └──────────────┘
+└─────────────┘
 ```
 
-Key points:
-
-1. **Build info**: Flash layout comes from ESP-IDF’s `build/flasher_args.json` (`flash_files`, `app`, `extra_esptool_args.chip`).
-2. **Paths**: WSL project path is converted via `wslpath -w` to `D:\...` so Windows esptool can read bins under `build\`.
-3. **Monitor**: PowerShell `System.IO.Ports.SerialPort` reads the COM port; wsl-idf colors stdout and runs crash decoding.
-
----
-
-## Typical Workflows
-
-### Daily Development (App Code Changes)
-
-```bash
-cd ~/projects/my-esp-project
-source ~/esp/esp-idf/export.sh
-
-# Edit code → app-only flash + monitor
-wsl-idf -c flash-app -p COM3 monitor
-```
-
-### Partition Table / Bootloader / First Flash
-
-```bash
-wsl-idf -c flash -p COM3 monitor
-# Or wipe entire flash first:
-wsl-idf -c flash-erase -p COM3 monitor
-```
-
-### Export Merged Firmware
-
-```bash
-# Requires build/flasher_args.json (at least one build)
-wsl-idf -c merge
-ls -la full-*.bin
-```
-
-### Debug a Crash
-
-```bash
-# Build first; ELF must match firmware on device
-wsl-idf -p COM3 monitor
-# Reproduce crash — addr2line output is appended automatically
-```
-
----
-
-## FAQ
-
-### ESPTOOL Not Set
-
-```
-未设置 ESPTOOL 环境变量（Windows 侧 esptool 路径）
-```
-
-Fix: Set `ESPTOOL` to the full Windows path to esptool as described in [Configuration](#1-esptool-environment-variable-required).
-
-### flasher_args.json Not Found
-
-```
-No such file or directory ... build/flasher_args.json
-```
-
-Fix: Run `idf.py build` from the project root, or use `wsl-idf -c flash` (builds automatically).
-
-### flash-app Missing app Field
-
-```
-flasher_args.json 中缺少 app 字段
-```
-
-Fix: Confirm ESP-IDF version and project config; run a full `idf.py build`. Some special builds may omit the app entry—use `flash` instead.
-
-### Serial Port Open Failed
-
-PowerShell shows `串口打开失败`:
-
-- Confirm `-p` matches Device Manager (case usually irrelevant; match the listed output)
-- Close other apps using the COM port (Arduino IDE, another monitor, serial tools)
-- Replug USB or try a different cable
-
-### wslpath Failed
-
-```
-wslpath 失败（退出码 ...）
-```
-
-Fix: Run inside WSL with a valid current directory; `cd` to the project root if needed.
-
-### Crash Decoding Disabled or Wrong Line Numbers
-
-- Run from project root with `build/*.elf` present
-- `source export.sh` so addr2line is on PATH
-- Re-flash firmware from the same build as the ELF before reproducing the crash
-
-### Empty or Missing COM List
-
-- Check Windows drivers and USB connection
-- WSL must invoke `powershell.exe`; test with `powershell.exe -Command "Get-WmiObject Win32_SerialPort"`
-
-### merge Output Location
-
-Merged file is written to the **current project root**: `full-<directory-name>.bin`. For a folder named `my-esp-project`, output is `full-my-esp-project.bin`.
+1. Flash list and chip come from `build/flasher_args.json`.
+2. Bin paths are passed to esptool in Windows form.
+3. Monitor uses PowerShell `SerialPort`; stdout is colored and crash-decoded by wsl-idf.
 
 ---
 
@@ -506,12 +455,67 @@ Merged file is written to the **current project root**: `full-<directory-name>.b
 
 | Goal | idf.py (native Linux USB) | wsl-idf (WSL + Windows COM) |
 |------|---------------------------|-----------------------------|
-| Build | `idf.py build` | Auto-build inside `flash*` subcommands; not for `merge`/`erase` |
+| Build | `idf.py build` | Auto in `flash` / `flash-app` / `flash-erase`; not in `merge` / `erase` / `extract-bins` |
 | Flash | `idf.py flash` | `wsl-idf -c flash -p COMx` |
 | App only | `idf.py app-flash` | `wsl-idf -c flash-app -p COMx` |
 | Erase + flash | `idf.py erase-flash flash` | `wsl-idf -c flash-erase -p COMx` |
+| Erase only | `idf.py erase-flash` | `wsl-idf -c erase -p COMx` |
 | Monitor | `idf.py monitor` | `wsl-idf -p COMx monitor [baud]` |
-| Merge bin | Manual esptool args | `wsl-idf -c merge` |
+| Merge bin | Manual esptool | `wsl-idf -c merge` |
+| Export bins by offset | — | `wsl-idf -c extract-bins` |
 
-wsl-idf **does not replace** full ESP-IDF project management (menuconfig, clean, component deps, etc.)—use `idf.py` in WSL for those.
+`wsl-idf` does **not** replace ESP-IDF project management (`menuconfig`, `clean`, components, etc.).
 
+---
+
+## FAQ
+
+### ESPTOOL unset
+
+Set `ESPTOOL` as in [Configuration](#environment-variable-esptool-required-for-flash--erase--merge).
+
+### Missing flasher_args.json
+
+Run `idf.py build`, or use `flash` / `flash-app` / `flash-erase` (auto-build).
+
+### flash-app missing `app`
+
+Complete a normal project build, or use `-c flash`.
+
+### Serial open failed
+
+Match `-p` to Device Manager / the listed COM; close other monitors; reseat USB.
+
+### wslpath failed
+
+Run inside WSL with a path `wslpath -w` accepts.
+
+### Crash decode off / wrong lines
+
+Project root with matching `build/*.elf`; IDF export sourced; firmware and ELF from the same build.
+
+### Empty COM list
+
+Check Windows drivers/USB; test: `powershell.exe -Command "Get-WmiObject Win32_SerialPort"`.
+
+### extract-bins clears the directory
+
+Expected: each run deletes and recreates `flash-bins/`.
+
+---
+
+## Feature Status
+
+| Feature | Status |
+|---------|--------|
+| flash / flash-app / flash-erase / erase | Implemented |
+| merge | Implemented |
+| extract-bins | Implemented |
+| monitor (coloring, `@@@` highlight) | Implemented |
+| Crash addr2line decode | Implemented (degrades with a notice if unavailable) |
+| COM enumeration | Implemented |
+| `--about` | Implemented |
+| CLI overrides for flash baud / flash mode | Not implemented (hardcoded) |
+| Interactive TX / idf.py-monitor keybindings | Not implemented |
+
+VS Code extension features: see [`vsc-plugin/README.md`](./vsc-plugin/README.md).
